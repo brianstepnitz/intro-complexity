@@ -1,27 +1,194 @@
 breed [ants ant]
 
+ants-own [
+  num-idlers-left-to-tell
+  activation-level
+]
+
+globals [
+  ground-color
+  nest-color
+  food-color
+
+  idler-color
+  forager-color
+  transporter-color
+
+  talker-color
+
+  arrivals-this-window
+  departures-this-window
+
+  list-arrivals
+  list-departures
+]
+
 to setup
   clear-all
-  set-default-shape ants "bug"
-  ask up-to-n-of initial-population-size patches [
-    sprout-ants 1 [
-      set color red
+
+  set ground-color brown
+  set nest-color yellow
+  set food-color green
+
+  set idler-color red
+  set forager-color pink
+  set transporter-color violet
+
+  ask patches [ set pcolor ground-color ]
+
+  let nest-radius 5
+
+  ask patch 0 0 [
+    ask patches in-radius nest-radius [
+      set pcolor nest-color
     ]
   ]
+
+  ask up-to-n-of max-food patches with [pcolor = ground-color] [
+    set pcolor food-color
+  ]
+
+  set-default-shape ants "bug"
+  let ants-left-to-place initial-population-size
+  while [ants-left-to-place > 0] [
+    let nest-patches (patches with [ pcolor = nest-color ])
+    ask up-to-n-of ants-left-to-place nest-patches [
+      sprout-ants 1 [
+        set color idler-color
+      ]
+    ]
+
+    set ants-left-to-place (ants-left-to-place - count nest-patches)
+  ]
+
+  ask ants [
+    set num-idlers-left-to-tell 0
+    set activation-level (random activation-threshold)
+  ]
+
+  set arrivals-this-window 0
+  set departures-this-window 0
+
+  set list-arrivals []
+  set list-departures []
 
   reset-ticks
 end
 
 to go
-  ask ants [
-    ; wiggle
-    wiggle
-    ; collision avoidance
-    while [patch-ahead 1 = nobody or count ants-on patch-ahead 1 > 0] [wiggle]
-    ; move
-    forward 1
+  let curr-turtles turtle-set turtles
+
+  ask curr-turtles [
+
+    ; Move all ants first, before changing roles.
+
+    if (color = idler-color) [
+      idle-move
+    ]
+    if (color = forager-color) [
+      forage-move
+    ]
+    if (color = transporter-color) [
+      transport-move
+    ]
+
+    ; Now check if it's time to change roles.
+
+    if (color = forager-color and [pcolor] of patch-here = food-color) [
+      ; found food! return it to the nest and tell the others
+
+      ask patch-here [ set pcolor ground-color ]
+
+      ; constant food
+      ask one-of patches with [pcolor = ground-color] [ set pcolor food-color ]
+
+      set color transporter-color
+      set num-idlers-left-to-tell num-idlers-to-tell
+    ]
+
+    if (color = transporter-color and [pcolor] of patch-here = nest-color) [
+      set arrivals-this-window (arrivals-this-window + 1)
+      set color idler-color
+    ]
+
+    if (color = idler-color) [
+
+      ; if we're in the nest and have other ants left to tell about food, tell them
+      if (num-idlers-left-to-tell > 0) [
+        let idlers-to-tell up-to-n-of num-idlers-left-to-tell other ants-here with [color = idler-color]
+        set num-idlers-left-to-tell (num-idlers-left-to-tell - count idlers-to-tell)
+        ask idlers-to-tell [
+          set activation-level (activation-level + activation-increase)
+        ]
+      ]
+
+      set activation-level (activation-level + min-activation-increase)
+
+      if (activation-level > activation-threshold) [
+
+        set departures-this-window (departures-this-window + 1)
+
+        set color forager-color
+        set activation-level 0
+      ]
+    ]
+  ] ; end ask
+
+  if (ticks mod tick-window = 0) [
+    set-current-plot "Arrivals and Departures"
+    if (arrivals-this-window > plot-y-max) [ set-plot-y-range 0 arrivals-this-window ]
+    if (departures-this-window > plot-y-max) [ set-plot-y-range 0 departures-this-window ]
+    set-plot-x-range 0 (plot-x-max + 1)
+    set-current-plot-pen "arrivals"
+    plot arrivals-this-window
+    set-current-plot-pen "departures"
+    plot departures-this-window
+
+    set list-arrivals (lput arrivals-this-window list-arrivals)
+    set list-departures (lput departures-this-window list-departures)
+
+    if (length list-arrivals > 3) [
+      clear-output
+      output-print (word "correlation(arrivals_t, departures_t) = " (correlation list-arrivals list-departures) )
+      output-print (word "covariance(arrivals_t, departures_t) = " (covariance list-arrivals list-departures))
+    ]
+
+    set arrivals-this-window 0
+    set departures-this-window 0
   ]
+
   tick
+end
+
+to-report covariance [xs ys]
+  let mean-x (mean xs)
+  let mean-y (mean ys)
+  let n (length xs)
+
+  let numerator 0
+  (foreach xs ys [ [x y] ->
+    set numerator ( numerator + (x - mean-x) * (y - mean-y) )
+    ])
+
+  report numerator / (n - 1)
+end
+
+
+to-report correlation [xs ys]
+  let mean-x (mean xs)
+  let stdev-x (standard-deviation xs)
+  let mean-y (mean ys)
+  let stdev-y (standard-deviation ys)
+  let N (length xs)
+
+  let r 0
+  if (stdev-x != 0 and stdev-y != 0) [
+  (foreach xs ys [ [x y] ->
+    set r ( r + ( ( x - mean-x) * ( y - mean-y) ) / ( (N - 1) * stdev-x * stdev-y ) )
+    ])
+  ]
+
+  report r
 end
 
 to wiggle
@@ -31,12 +198,43 @@ to wiggle
     left random left-right-wiggle-angle-max
   ]
 end
+
+to idle-move
+  wiggle
+
+  while [ not ([pcolor] of patch-ahead 1 = nest-color) ] [ wiggle ]
+
+  forward 1
+end
+
+to forage-move
+
+  ifelse ([pcolor] of patch-here = nest-color) [
+
+    ; If in the nest, move directly out of the nest.
+    face min-one-of ( patches with [pcolor != nest-color] ) [distance self]
+  ]
+  [
+
+    ; Else if out of the nest, randomly move around the world outside the nest.
+    wiggle
+    while [patch-ahead 1 = nobody or [pcolor] of patch-ahead 1 = nest-color ] [ wiggle ]
+  ]
+
+  forward 1
+end
+
+to transport-move
+  face min-one-of ( patches with [pcolor = nest-color] ) [distance self]
+
+  forward 1
+end
 @#$#@#$#@
 GRAPHICS-WINDOW
-276
-10
-713
-448
+265
+11
+936
+683
 -1
 -1
 13.0
@@ -49,10 +247,10 @@ GRAPHICS-WINDOW
 0
 0
 1
--16
-16
--16
-16
+-25
+25
+-25
+25
 0
 0
 1
@@ -60,25 +258,25 @@ ticks
 30.0
 
 SLIDER
-6
-10
-178
-43
+8
+51
+180
+84
 initial-population-size
 initial-population-size
 1
 100
-29.0
+100.0
 1
 1
 NIL
 HORIZONTAL
 
 BUTTON
-724
-11
-788
-44
+6
+332
+70
+365
 Setup
 setup
 NIL
@@ -92,10 +290,10 @@ NIL
 1
 
 SLIDER
-6
-50
-206
-83
+8
+91
+208
+124
 left-right-wiggle-angle-max
 left-right-wiggle-angle-max
 0
@@ -107,10 +305,10 @@ NIL
 HORIZONTAL
 
 BUTTON
-724
-50
-787
-83
+80
+333
+143
+366
 Go
 go
 T
@@ -123,42 +321,185 @@ NIL
 NIL
 1
 
+SLIDER
+8
+129
+180
+162
+activation-threshold
+activation-threshold
+1
+1000
+500.0
+1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+9
+168
+181
+201
+num-idlers-to-tell
+num-idlers-to-tell
+0
+100
+100.0
+1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+9
+10
+181
+43
+max-food
+max-food
+1
+100
+100.0
+1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+0
+207
+172
+240
+activation-increase
+activation-increase
+1
+100
+100.0
+1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+6
+246
+184
+279
+min-activation-increase
+min-activation-increase
+1
+100
+1.0
+1
+1
+NIL
+HORIZONTAL
+
+PLOT
+949
+13
+1558
+378
+Arrivals and Departures
+tick window
+count
+0.0
+0.5
+0.0
+0.5
+false
+true
+"" ""
+PENS
+"departures" 1.0 0 -2064490 true "" ""
+"arrivals" 1.0 0 -8630108 true "" ""
+
+OUTPUT
+949
+390
+1560
+481
+11
+
+SLIDER
+7
+290
+179
+323
+tick-window
+tick-window
+1
+100
+30.0
+1
+1
+NIL
+HORIZONTAL
+
 @#$#@#$#@
 ## WHAT IS IT?
 
-(a general understanding of what the model is trying to show or explain)
+This model proposes an agent-based explanation for the behavior explored in "The Regulation of Ant Colony Foraging Activity without Spatial Information" by Prabhaka et al (2012). It was completed as part of the coursework for the "Introduction to Complexity" class held by Complexity Explorer ( https://www.complexityexplorer.org/courses/119-introduction-to-complexity ) Unit 7: "Models of Biological Self-Organization".
 
 ## HOW IT WORKS
 
-(what rules the agents use to create the overall behavior of the model)
+The world consists of a central nest area surrounded by ground area. Randomly strewn about the ground area are patches of food. The turtles represent ants, which can take on one of three roles: **idlers**, **foragers**, or **transporters**. On setup, all ants start as **idlers** spread out randomly in the nest.
+
+Every **idler** moves randomly around the nest while tracking its own _activation level_. Each tick, its _activation level_ increases by the configured _activation minimum_ amount. Once its _activation level_ crosses the configured _activation threshold_, it independently becomes a **forager**.
+
+**Foragers** walk directly out of the nest, and then randomly walk in the ground area until they walk onto a food patch. Then they turn into a **transporter**. The food patch becomes a regular ground patch, but a new food patch randomly appears in the ground area to maintain a constant amount of food in the world.
+
+The **transporter** then moves directly back to the nest. When it reaches the nest, it turns back into an **idler** at zero _activation level_ but it has the configured _number of idlers to tell_ that it found food. As it randomly moves around the nest, if it is on a  patch with other **idlers**, it increases their _activation level_ by the configured _activation increase_ amount until it has told all of the **idlers** it was configured to tell. That _activation increase_ may also trigger an **idler** to become a **forager**.
 
 ## HOW TO USE IT
 
-(how to use the model, including a description of each of the items in the Interface tab)
+* `max-food` controls the number of patches in the ground area that should be food patches.
+* `initial-population-size` controls the number of ants in the model.
+* `left-right-wiggle-angle-max` controls how much an ant's heading can change each tick if its is moving randomly.
+* `activation-threshold` controls how "activated" an **idler** needs to become before it turns into a **forager**.
+* `num-idlers-to-tell` controls how many **idlers** a returning **transporter** should "tell" about the food it found.
+* `activation-increase` controls how much more "activated" an **idler** becomes after another ant "tells" it about finding food.
+* `min-activation-increase` controls how much more "activated" an **idler** becomes each tick even without hearing about another ant coming back with food.
+* `tick-window` controls how many ticks should pass before updating the plots.
 
 ## THINGS TO NOTICE
 
-(suggested things for the user to notice while running the model)
+As time passes, after each _tick window_, the plot updates with the number of _**Arrivals**_ (the number of **transporters** that made it back to become **idlers** in the nest) and the number of _**Departures**_ (the number of **idlers** that "activated" into **foragers**). A standard _correlation_ and _covariance_ is then computed for those values. Under reasonable configurations, fairly strong covariances and correlations can be seen.
+
+However, even if the ants are configured to tell zero other ants about food and ants are left to their own independent _activation increase_ to reach the _activation threshold_, it is easy to show that the values still closely follow a Poisson distribution as seen in the referenced paper. Upon reflection, this makes sense, because then the ants in the nest closely model something like radioactive decay, which is known to follow a Poisson distribution.
 
 ## THINGS TO TRY
 
-(suggested things for the user to try to do (move sliders, switches, etc.) with the model)
+What parameters show the strongest correlation between _**Arrivals**_ and _**Departures**_?
+
+Can one derive a formula from the parameters to the distribution of _**Arrivals**_ and _**Departures**_?
 
 ## EXTENDING THE MODEL
 
-(suggested things to add or change in the Code tab to make the model more complicated, detailed, accurate, etc.)
+The amount of food in the world was held constant in order to easily see the correlation between _**Arrivals**_ and _**Departures**_. We could allow the amount of food to vary to see how that also affected the distribution of values.
 
-## NETLOGO FEATURES
-
-(interesting or unusual features of NetLogo that the model uses, particularly in the Code tab; or where workarounds were needed for missing features)
+The ants are both immortal and sterile. Adding some birth/death processes, maybe based on the amount of food found, may show its own interesting behavior.
 
 ## RELATED MODELS
 
-(models in the NetLogo Models Library and elsewhere which are of related interest)
+This model was specifically made to contrast with the basic NetLogo model "Ants". Whereas the ants in that model utilize pheromone trails in order to more efficiently find clusters of food, the ants in this model have zero spatial information on the location of scattered food and instead communicate with each other locally to convey the presence of food in the environment.
 
 ## CREDITS AND REFERENCES
 
-(a reference to the model's URL on the web if it has one, as well as any other necessary credits, citations, and links)
+Prabhakar B, Dektar KN, Gordon DM (2012) The Regulation of Ant Colony Foraging Activity without Spatial Information. PLoS Comput Biol 8(8): e1002670. doi:10.1371/journal.pcbi.1002670
+
+## COPYRIGHT AND LICENSE
+
+### The MIT License (MIT)
+
+Copyright 2021 Brian Stepnitz
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the “Software”), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 @#$#@#$#@
 default
 true
