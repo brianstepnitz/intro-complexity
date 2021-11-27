@@ -485,6 +485,8 @@ The ants are both immortal and sterile. Adding some birth/death processes, maybe
 
 This model was specifically made to contrast with the basic NetLogo model "Ants". Whereas the ants in that model utilize pheromone trails in order to more efficiently find clusters of food, the ants in this model have zero spatial information on the location of scattered food and instead communicate with each other locally to convey the presence of food in the environment.
 
+Each ant having its own internal activation counter was inspired by the NetLogo model "Fireflies".
+
 ## CREDITS AND REFERENCES
 
 Prabhakar B, Dektar KN, Gordon DM (2012) The Regulation of Ant Colony Foraging Activity without Spatial Information. PLoS Comput Biol 8(8): e1002670. doi:10.1371/journal.pcbi.1002670

@@ -1,52 +1,24 @@
-; MIT License
-;
-; Copyright (c) 2021 Brian Stepnitz
-;
-; Permission is hereby granted, free of charge, to any person obtaining a copy
-; of this software and associated documentation files (the "Software"), to deal
-; in the Software without restriction, including without limitation the rights
-; to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-; copies of the Software, and to permit persons to whom the Software is
-; furnished to do so, subject to the following conditions:
-;
-; The above copyright notice and this permission notice shall be included in all
-; copies or substantial portions of the Software.
-;
-; THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-; IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-; FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-; AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-; LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-; OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-; SOFTWARE.
-
-; Complexity Explorer "Introduction to Complexity" course Unit 6 "Cellular Automata" homework
-; https://www.complexityexplorer.org/courses/119-introduction-to-complexity/segments/11875
-;
-; Advanced Level
-;
-; Implement a version of the Evolving Cellular Automata with Genetic Algorithms project
-; described in Unit 6.6 and in the paper “Evolving Cellular Automata to Perform Computations:
-; A Review of Recent Results” (linked from the Course Materials page). See what results you
-; obtain from evolving with small one-dimensional lattices (otherwise, the computation time can
-; get very large!). Feel free to share your results on the class forum!
-
 extensions [table]
 
 globals [
   the-lineup
+  the-iteration
+  the-initial-majority
 ]
 
 breed [codebooks codebook]
 
-codebooks-own [my-rulecode my-fitness]
+codebooks-own [
+  my-code-boollist
+  my-fitness
+]
 
 to setup
   clear-output
   clear-turtles
   clear-all-plots
 
-  resize-world 0 (lineup-width - 1) (1 - num-iterations) 0
+  resize-world 0 (lineup-width - 1) (1 - mean-iterations) 0
 
   set-current-plot "Fitness"
 end
@@ -55,32 +27,43 @@ end
 ; Running and displaying a single rule
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-to draw-random-lineup [chance]
+to populate-lineup
   clear-patches
 
-  set the-lineup (random-boolstring lineup-width chance)
+  ifelse (randomly-populate?) [
+    set the-lineup (random-boollist lineup-width lineup-density)
+    set lineup-id (to-hexstring the-lineup)
+  ] [
+    set the-lineup (from-hexstring lineup-id lineup-width)
+  ]
 
-  draw-lineup the-lineup 0
+  set the-iteration 0
+  draw-lineup the-lineup
+  set the-initial-majority calc-majority-state the-lineup
 end
 
-to draw-lineup [lineup row]
+to draw-lineup [lineup]
   let index 0
   while [index < length the-lineup] [
     if (item index the-lineup) [
-      ask patch index (- row) [set pcolor white]
+      ask patch index (- the-iteration) [set pcolor white]
     ]
     set index (index + 1)
   ]
 end
 
-to iterate-rule
-  let rulecode (encode (2 * sight-range + 1) the-rulecode)
+to run-codebook-once [code-boollist]
+  set the-iteration (the-iteration + 1)
+  set the-lineup (calc-next-lineup code-boollist the-lineup)
 
-  let iteration 0
-  while [iteration < num-iterations - 1] [
-    set iteration (iteration + 1)
-    set the-lineup (calc-next-lineup rulecode the-lineup)
-    draw-lineup the-lineup iteration
+  draw-lineup the-lineup
+end
+
+to run-codebook
+  let code-boollist ( from-hexstring codebook-id (2 ^ (2 * sight-range + 1)) )
+
+  while [the-iteration < mean-iterations - 1] [
+    run-codebook-once code-boollist
   ]
 end
 
@@ -93,139 +76,164 @@ to go
   ; make initial codebooks
   create-codebooks num-codebooks [
     set hidden? true
-    set my-rulecode (random-boolstring (2 ^ (2 * sight-range + 1)) (random-float 1))
+    set my-code-boollist (random-boollist (2 ^ (2 * sight-range + 1)) (random-float 1))
     set my-fitness 0
   ]
 
   let perfects-count table:make
-  let min-fitness-so-far []
-  let max-fitness-so-far []
+  let min-plotfitness-so-far []
+  let max-plotfitness-so-far []
 
   foreach (range num-generations) [gen ->
     output-print (word "generation: " gen)
     reset-timer
 
-    let total-fitness 0
+    let lineups []
+    foreach (range (1 + trial-increments)) [trial ->
+      let proportion (trial / trial-increments)
+      let lineup (random-boollist lineup-width proportion)
+      set lineups (lput lineup lineups)
+    ]
+
     ask codebooks [
-      set my-fitness (run-trials my-rulecode)
-      set total-fitness (total-fitness + my-fitness)
+      set my-fitness (run-trials my-code-boollist lineups)
     ]
 
-    output-print (word timer " seconds")
-
-    make-next-generation total-fitness codebooks
-
-    ; survival of the fittest
-    ask min-n-of ((1 - selection) * num-codebooks) (codebooks with [my-fitness > 0]) [my-fitness] [
-      die
-    ]
+    output-print (word timer " seconds to calculate fitnesses")
 
     let max-fitness [my-fitness] of (max-one-of codebooks [my-fitness])
-    set min-fitness-so-far (ifelse-value (is-list? min-fitness-so-far or max-fitness < min-fitness-so-far) [max-fitness] [min-fitness-so-far])
-    set max-fitness-so-far (ifelse-value (is-list? max-fitness-so-far or max-fitness > max-fitness-so-far) [max-fitness] [max-fitness-so-far])
-    output-print (word "max-fitness: " max-fitness)
+    set min-plotfitness-so-far (ifelse-value (is-list? min-plotfitness-so-far or max-fitness < min-plotfitness-so-far) [max-fitness] [min-plotfitness-so-far])
+    set max-plotfitness-so-far (ifelse-value (is-list? max-plotfitness-so-far or max-fitness > max-plotfitness-so-far) [max-fitness] [max-plotfitness-so-far])
+    output-print (word "population max-fitness: " max-fitness)
 
     ask codebooks with-max [my-fitness] [
-      output-print (word "max-fitness rulecode: " (decode my-rulecode))
+      output-print (word "* codebook-id: " (to-hexstring my-code-boollist))
       if (my-fitness = 1) [
-        let my-rulecode-num (decode my-rulecode)
-        let counts table:get-or-default perfects-count my-rulecode-num 0
-        table:put perfects-count my-rulecode-num (counts + 1)
+        let my-codelist-id (to-hexstring my-code-boollist)
+        let counts table:get-or-default perfects-count my-codelist-id 0
+        table:put perfects-count my-codelist-id (counts + 1)
       ]
     ]
 
-    let mean-fitness (total-fitness / num-codebooks)
-    set min-fitness-so-far (ifelse-value (is-list? min-fitness-so-far or mean-fitness < min-fitness-so-far) [mean-fitness] [min-fitness-so-far])
-    set max-fitness-so-far (ifelse-value (is-list? max-fitness-so-far or mean-fitness > max-fitness-so-far) [mean-fitness] [max-fitness-so-far])
-    output-print (word "mean-fitness: " mean-fitness)
+    let mean-fitness (mean [my-fitness] of codebooks)
+    set min-plotfitness-so-far (ifelse-value (is-list? min-plotfitness-so-far or mean-fitness < min-plotfitness-so-far) [mean-fitness] [min-plotfitness-so-far])
+    set max-plotfitness-so-far (ifelse-value (is-list? max-plotfitness-so-far or mean-fitness > max-plotfitness-so-far) [mean-fitness] [max-plotfitness-so-far])
+    output-print (word "population mean-fitness: " mean-fitness)
 
-    set-plot-x-range -0.5 (gen + 0.5)
-    set-plot-y-range ((precision min-fitness-so-far 2) - 0.01) ((precision max-fitness-so-far 2) + 0.01)
-    set-current-plot-pen "max"
-    plotxy gen max-fitness
-    set-current-plot-pen "mean"
-    plotxy gen mean-fitness
-  ]
-
-  foreach sort-by [[pair1 pair2] -> (last pair1 < last pair2)] (table:to-list perfects-count) [pair -> output-print (word "rulecode: " (first pair) " perfect-count: " (last pair))]
-end
-
-to make-next-generation [total-fitness curr-generation]
-  create-codebooks ((1 - selection) * num-codebooks) [
-    set hidden? true
-
-    let p1 (random-float 1)
-    let p2 (random-float 1)
-
-    let accumulator 0
-    let parent1 []
-    let parent2 []
-    ask curr-generation [
-      let normalized-fitness (my-fitness / total-fitness)
-      set accumulator (accumulator + normalized-fitness)
-
-      if (is-list? parent1 and p1 < accumulator) [set parent1 self]
-      if (is-list? parent2 and p2 < accumulator) [set parent2 self]
-      if (p1 < accumulator and p2 < accumulator) [stop]
+    ; survival of the fittest
+    let num-elite max ( list (selection * num-codebooks) (count codebooks with [my-fitness = 1]) )
+    let num-bottom max ( list (num-codebooks - num-elite) 0 )
+    ask min-n-of num-bottom (codebooks with [my-fitness > 0]) [my-fitness] [
+      die
     ]
 
-    let rulecode1 ([my-rulecode] of parent1)
-    let rulecode2 ([my-rulecode] of parent2)
+    let mean-elite-fitness (mean [my-fitness] of codebooks)
+    set min-plotfitness-so-far (ifelse-value (is-list? min-plotfitness-so-far or mean-elite-fitness < min-plotfitness-so-far) [mean-elite-fitness] [min-plotfitness-so-far])
+    set max-plotfitness-so-far (ifelse-value (is-list? max-plotfitness-so-far or mean-elite-fitness > max-plotfitness-so-far) [mean-elite-fitness] [max-plotfitness-so-far])
+    output-print (word "elite mean-fitness: " mean-elite-fitness)
 
-    let crossover-index (random length rulecode1)
+    set-plot-x-range -0.5 (gen + 0.5)
+    set-plot-y-range ((precision (min-plotfitness-so-far - 0.01) 2)) ((precision (max-plotfitness-so-far + 0.01) 2))
+    set-current-plot-pen "population max"
+    plotxy gen max-fitness
+    set-current-plot-pen "population mean"
+    plotxy gen mean-fitness
+    set-current-plot-pen "elite mean"
+    plotxy gen mean-elite-fitness
 
-    let cross1 (sublist rulecode1 0 (crossover-index + 1))
-    let cross2 ifelse-value (crossover-index < 1 + length rulecode2) [sublist rulecode2 (crossover-index + 1) (length rulecode2)] [ [] ]
-    let next-rulecode (sentence cross1 cross2)
+    make-next-generation (turtle-set codebooks)
+  ] ; next generation
 
-    set my-rulecode (mutate-with-chance next-rulecode)
+  foreach sort-by [[pair1 pair2] -> (last pair1 < last pair2)] (table:to-list perfects-count) [pair -> output-print (word "codebook-id: " (first pair) " perfect-count: " (last pair))]
+end
+
+to make-next-generation [elite-codebooks]
+  let total-fitness (sum [my-fitness] of elite-codebooks)
+  create-codebooks (num-codebooks - (count elite-codebooks)) [
+    set hidden? true
+
+    let parent1 []
+    let parent2 []
+
+    let parents [self] of ( n-of 2 elite-codebooks )
+    set parent1 (first parents)
+    set parent2 (last parents)
+
+    let boollist1 ([my-code-boollist] of parent1)
+    let boollist2 ([my-code-boollist] of parent2)
+
+    let crossover-index (random length boollist1)
+
+    let cross1 (sublist boollist1 0 (crossover-index + 1))
+    let cross2 ifelse-value (crossover-index < 1 + length boollist2) [sublist boollist2 (crossover-index + 1) (length boollist2)] [ [] ]
+    let next-boollist (sentence cross1 cross2)
+
+    set my-code-boollist (mutate-with-count mutation-count next-boollist)
     set my-fitness 0
   ]
 end
 
-to-report run-trials [rulecode]
+to-report run-trials [code-boollist lineups]
   let total 0
-  foreach (range (1 + trial-increments)) [trial ->
-    let proportion (trial / trial-increments)
-    set total (total + (run-iterations rulecode (random-boolstring lineup-width proportion)))
+  foreach (lineups) [lineup ->
+    set total ( total + (run-iterations code-boollist lineup) )
   ]
 
   let mean-fitness (total / (1 + trial-increments))
   report mean-fitness
 end
 
-; run 'rulecode' on 'start-lineup' for 'num-iterations', report fitness
-to-report run-iterations [rulecode start-lineup]
+; run 'boollist' on 'start-lineup' for some number of iterations, report fitness
+to-report run-iterations [code-boollist start-lineup]
   let iter 0
   let prev-lineup []
   let curr-lineup start-lineup
-  while [iter < num-iterations] [
+
+  let iteration-limit (random-poisson mean-iterations)
+  ; if (fixed-iterations?) [ set iteration-limit mean-iterations ]
+
+  while [iter < iteration-limit] [
     set prev-lineup curr-lineup
-    let next-lineup (calc-next-lineup rulecode curr-lineup)
-    set curr-lineup next-lineup
-    set iter (iter + 1)
+    let next-lineup (calc-next-lineup code-boollist curr-lineup)
+    ifelse (next-lineup = curr-lineup) [
+      set iter iteration-limit
+    ]
+    [
+      set curr-lineup next-lineup
+      set iter (iter + 1)
+    ]
   ]
 
-  let num-true (reduce [ [true-so-far next-item] -> true-so-far + (ifelse-value next-item [1] [0]) ] (fput 0 start-lineup))
-  let majority-state (num-true > lineup-width / 2)
-
-  report (calc-fitness majority-state prev-lineup curr-lineup)
+  ; report (calc-proportion-fitness majority-state prev-lineup curr-lineup)
+  report (calc-performance-fitness (calc-majority-state start-lineup) curr-lineup)
 end
 
-to-report mutate-with-chance [rulecode]
-  report map [
-    elem -> ifelse-value (random-float 1 < mutation-chance) [not elem] [elem]
-  ] rulecode
+to-report calc-majority-state [boollist]
+  let num-true (reduce [ [true-so-far next-item] -> true-so-far + (ifelse-value next-item [1] [0]) ] (fput 0 boollist))
+  let majority-state (num-true > lineup-width / 2)
+
+  report majority-state
+end
+
+to-report mutate-with-count [num boollist]
+  let indices (n-of num (range length boollist))
+  foreach indices [index -> set boollist (replace-item index boollist (not item index boollist)) ]
+
+  report boollist
 end
 
 ; compute the proprotion of cells in 'prev-lineup' + 'end-lineup' that are in state 'majority-state'
-to-report calc-fitness [majority-state prev-lineup end-lineup]
+to-report calc-proportion-fitness [majority-state prev-lineup end-lineup]
   let count-state (reduce [[count-so-far curr-state] -> ifelse-value (majority-state = curr-state) [count-so-far + 1] [count-so-far]] (fput 0 (sentence prev-lineup end-lineup)))
 
   report count-state / (2 * lineup-width)
 end
 
-to-report calc-next-lineup [rulecode prev-lineup]
+to-report calc-performance-fitness [majority-state end-lineup]
+  report ifelse-value (end-lineup = (n-values lineup-width [majority-state])) [1] [0]
+end
+
+to-report calc-next-lineup [code-boollist prev-lineup]
   let half-neighborhood (floor ((2 * sight-range + 1) / 2) )
 
   ; wrap the lineup around
@@ -234,18 +242,18 @@ to-report calc-next-lineup [rulecode prev-lineup]
   ; it's an ouroboros
   let ring (sentence tail prev-lineup head)
 
-  report last reduce [[neighborhood-lineup-so-far curr-elem] -> calc-next-elem rulecode (first neighborhood-lineup-so-far) (last neighborhood-lineup-so-far) curr-elem] (fput (list [] []) ring)
+  report last reduce [[neighborhood-lineup-so-far curr-elem] -> calc-next-elem code-boollist (first neighborhood-lineup-so-far) (last neighborhood-lineup-so-far) curr-elem] (fput (list [] []) ring)
 end
 
-to-report calc-next-elem [rulecode prev-neighborhood next-lineup-so-far curr-elem]
+to-report calc-next-elem [code-boollist prev-neighborhood next-lineup-so-far curr-elem]
   if (length prev-neighborhood < (2 * sight-range + 1) - 1) [
     ; still building up to first neighborhood
     report (list (lput curr-elem prev-neighborhood) next-lineup-so-far)
   ]
 
-  let neighborhood (ifelse-value (length prev-neighborhood = (2 * sight-range + 1)) [lput curr-elem (butfirst prev-neighborhood)] [lput curr-elem prev-neighborhood])
+  let neighborhood (ifelse-value (length prev-neighborhood = (2 * sight-range + 1)) [lput curr-elem (but-first prev-neighborhood)] [lput curr-elem prev-neighborhood])
 
-  let next-elem (eval-rule rulecode neighborhood)
+  let next-elem (eval-rule code-boollist neighborhood)
 
   report (list neighborhood (lput next-elem next-lineup-so-far))
 end
@@ -253,100 +261,152 @@ end
 ; For a one-dimensional cellular automaton with neighborhood size 'n'
 ; There are 2^n corresponding possible neighborhood configurations
 ; So there are 2^(2^n) possible rules
-; A rulecode is a 2^(2^n) length binary array specifying one of those rules
-; The rulecode encodes the next cell state given
+; A code-boollist is a 2^(2^n) length binary array specifying one of those rules
+; The code-boollist encodes the next cell state given
 ; every possible of its neighborhood configuration of the previous state
 ;
-; This function starts with the entire rulecode binary array
+; This function starts with the entire code-boollist binary array
 ; and the entire neighborhood binary array
 ;
 ; If the first element in the neighborhood is 1,
-; then the state of the cell is given in the first half of the rulecode
-; else the state is given in the last half of the rulecode
+; then the state of the cell is given in the first half of the code-boollist
+; else the state is given in the last half of the code-boollist
 ;
-; It then slices the rulecode to that half,
+; It then slices the code-boollist to that half,
 ; and slices off the first element of the neighborhood,
 ; and recurses down
-; until the rulecode-slice is a single element,
+; until the code-boollist-slice is a single element,
 ; which we know will be the next state of the cell
-to-report eval-rule [rulecode-slice neighborhood-slice]
-  let l length rulecode-slice
+to-report eval-rule [code-boollist-slice neighborhood-slice]
+  let l length code-boollist-slice
   report ifelse-value (l = 1)
   [
-        last rulecode-slice
+        last code-boollist-slice
   ]
   [
     ifelse-value first neighborhood-slice
     [
-      eval-rule (sublist rulecode-slice 0 (l / 2)) (butfirst neighborhood-slice)
+      eval-rule (sublist code-boollist-slice 0 (l / 2)) (but-first neighborhood-slice)
     ]
     [
-      eval-rule (sublist rulecode-slice (l / 2) l) (butfirst neighborhood-slice)
+      eval-rule (sublist code-boollist-slice (l / 2) l) (but-first neighborhood-slice)
     ]
   ]
 end
 
-to-report random-boolstring [len proportion]
+to-report random-boollist [len proportion]
   let indices (n-of (round (len * proportion)) (n-values len [i -> i]))
   report n-values len [i -> member? i indices]
 end
 
-; encode 'num' as an 'arity'-bit boolean string
-to-report encode [arity num]
-  report pad-to-length (2 ^ arity) (to-boolstring num)
+; encode 'num' as an 'arity'-bit boolean list
+to-report to-arity-boollist [arity num]
+  report pad-to-length (2 ^ arity) (to-boollist num)
 end
 
-; convert 'num' to a boolstring
-to-report to-boolstring [num]
+; convert 'num' to a boollist
+to-report to-boollist [num]
   report ifelse-value (num < 1)
   [
     []
   ]
   [
-    lput (num mod 2 = 1) (to-boolstring (floor (num / 2)))
+    lput (num mod 2 = 1) (to-boollist (floor (num / 2)))
   ]
 end
 
-; pad 'boolstring' to a one of length 'len'
-to-report pad-to-length [len boolstring]
-  if (length boolstring > len) [
+; pad 'boollist' to a one of length 'len'
+to-report pad-to-length [len boollist]
+  if (length boollist > len) [
     error "list too long!"
   ]
 
-  report ifelse-value (length boolstring >= len) [
-    boolstring
+  report ifelse-value (length boollist >= len) [
+    boollist
   ]
   [
-    pad-to-length len (fput false boolstring)
+    pad-to-length len (fput false boollist)
   ]
 end
 
-; convert boolstring to a number
-to-report decode [boolstring]
-  report ifelse-value (empty? boolstring) [
+; convert boollist to a number
+to-report to-num [boollist]
+  report ifelse-value (empty? boollist) [
     0
   ]
   [
-    (2 ^ (length boolstring - 1) * (ifelse-value (first boolstring) [1] [0]))
-    + (decode butfirst boolstring)
+    (2 ^ (length boollist - 1) * (ifelse-value (first boollist) [1] [0]))
+    + (to-num but-first boollist)
   ]
 end
 
-; convert a boolstring to a bitstring
-to-report to-bitstring [boolstring]
-  report map [ ?1 -> ifelse-value ?1 [1] [0] ] boolstring
+; convert boollist to a hexadecimal string
+to-report to-hexstring [boollist]
+  let nibbles ( ceiling ((length boollist) / 4) )
+  let the-boollist (pad-to-length (4 * nibbles) boollist)
+
+  let index 0
+  let hexstring ""
+  while [index < length the-boollist] [
+    let digit ( to-num sublist the-boollist index (index + 4) )
+    (ifelse
+      digit = 10 [ set hexstring (word hexstring "A") ]
+      digit = 11 [ set hexstring (word hexstring "B") ]
+      digit = 12 [ set hexstring (word hexstring "C") ]
+      digit = 13 [ set hexstring (word hexstring "D") ]
+      digit = 14 [ set hexstring (word hexstring "E") ]
+      digit = 15 [ set hexstring (word hexstring "F") ]
+      [ set hexstring (word hexstring digit) ]
+    )
+    set index (index + 4)
+  ]
+
+  report hexstring
 end
 
-; convert a bitstring to a boolstring
-to-report from-bitstring [bitstring]
-  report map [ ?1 -> ?1 = 1] bitstring
+; convert hexstring to a arity-length boollist
+to-report from-hexstring [hexstring arity]
+  let index 0
+  let boollist []
+  while [index < length hexstring] [
+    let hexdigit ( item index hexstring )
+    let boollist-digit []
+    (ifelse
+      hexdigit = "0" [ set boollist (sentence boollist false false false false) ]
+      hexdigit = "1" [ set boollist (sentence boollist false false false true) ]
+      hexdigit = "2" [ set boollist (sentence boollist false false true false) ]
+      hexdigit = "3" [ set boollist (sentence boollist false false true true) ]
+      hexdigit = "4" [ set boollist (sentence boollist false true false false) ]
+      hexdigit = "5" [ set boollist (sentence boollist false true false true) ]
+      hexdigit = "6" [ set boollist (sentence boollist false true true false) ]
+      hexdigit = "7" [ set boollist (sentence boollist false true true true) ]
+      hexdigit = "8" [ set boollist (sentence boollist true false false false) ]
+      hexdigit = "9" [ set boollist (sentence boollist true false false true) ]
+      hexdigit = "A" [ set boollist (sentence boollist true false true false) ]
+      hexdigit = "B" [ set boollist (sentence boollist true false true true) ]
+      hexdigit = "C" [ set boollist (sentence boollist true true false false) ]
+      hexdigit = "D" [ set boollist (sentence boollist true true false true) ]
+      hexdigit = "E" [ set boollist (sentence boollist true true true false) ]
+      hexdigit = "F" [ set boollist (sentence boollist true true true true) ]
+      [ print (word "ERROR! '" hexdigit "' is not a hexadecimal digit!") ]
+    )
+
+    set index ( index + 1 )
+  ]
+
+  while [length boollist > arity] [
+    if (first boollist) [ print "ERROR! Removing `true` from a boollist" ]
+    set boollist (but-first boollist)
+  ]
+
+  report boollist
 end
 @#$#@#$#@
 GRAPHICS-WINDOW
-750
+1075
 10
-858
-319
+2573
+3219
 -1
 -1
 10.0
@@ -356,12 +416,12 @@ GRAPHICS-WINDOW
 1
 1
 0
-1
-1
+0
+0
 1
 0
-9
--29
+148
+-319
 0
 0
 0
@@ -370,10 +430,10 @@ ticks
 30.0
 
 BUTTON
-25
-390
-89
-423
+20
+420
+84
+453
 Setup
 setup
 NIL
@@ -387,10 +447,10 @@ NIL
 1
 
 BUTTON
-95
-390
-158
-423
+90
+420
+153
+453
 Go
 go
 NIL
@@ -405,14 +465,14 @@ NIL
 
 SLIDER
 5
-170
+155
 177
-203
-num-iterations
-num-iterations
+188
+mean-iterations
+mean-iterations
 10
 1000
-30.0
+320.0
 1
 1
 NIL
@@ -420,14 +480,14 @@ HORIZONTAL
 
 SLIDER
 5
-90
+215
 177
-123
+248
 num-codebooks
 num-codebooks
 16
 8192
-1024.0
+100.0
 1
 1
 NIL
@@ -435,48 +495,33 @@ HORIZONTAL
 
 SLIDER
 5
-250
+255
 177
-283
+288
 num-generations
 num-generations
 20
 2000
-128.0
+100.0
 1
-1
-NIL
-HORIZONTAL
-
-SLIDER
-5
-290
-177
-323
-mutation-chance
-mutation-chance
-0
-1
-0.025
-0.001
 1
 NIL
 HORIZONTAL
 
 OUTPUT
-185
+225
 10
-555
+685
 525
 11
 
 BUTTON
-645
-115
-742
-148
-Iterate Rule
-iterate-rule
+960
+215
+1072
+248
+Run Codebook
+run-codebook
 NIL
 1
 T
@@ -488,38 +533,38 @@ NIL
 1
 
 INPUTBOX
-575
-10
-727
-70
-the-rulecode
-4.009420928E9
+690
+180
+955
+240
+codebook-id
+FFDF9F6ED7FBDCFECCDED9BE5CBE3600
 1
 0
-Number
+String
 
 SLIDER
-565
-75
-737
-108
-init-lineup
-init-lineup
+875
+10
+1047
+43
+lineup-density
+lineup-density
 0
 1
-0.55
+0.9
 0.01
 1
 NIL
 HORIZONTAL
 
 BUTTON
-560
-115
-637
-148
+835
+55
+912
+88
 Populate
-draw-random-lineup init-lineup
+populate-lineup
 NIL
 1
 T
@@ -532,14 +577,14 @@ NIL
 
 SLIDER
 5
-10
+75
 177
-43
+108
 lineup-width
 lineup-width
 3
-99
-10.0
+200
+149.0
 1
 1
 NIL
@@ -547,14 +592,14 @@ HORIZONTAL
 
 SLIDER
 5
-50
+10
 177
-83
+43
 sight-range
 sight-range
 0
 3
-2.0
+3.0
 1
 1
 NIL
@@ -562,14 +607,14 @@ HORIZONTAL
 
 SLIDER
 5
-130
+115
 177
-163
+148
 trial-increments
 trial-increments
 3
 100
-20.0
+100.0
 1
 1
 NIL
@@ -577,14 +622,14 @@ HORIZONTAL
 
 SLIDER
 5
-210
+315
 177
-243
+348
 selection
 selection
 0
 1
-0.1
+0.2
 0.01
 1
 NIL
@@ -593,7 +638,7 @@ HORIZONTAL
 PLOT
 5
 535
-555
+1015
 815
 Fitness
 Generation
@@ -603,48 +648,151 @@ Fitness
 0.0
 1.0
 false
-false
+true
 "" ""
 PENS
-"mean" 1.0 0 -955883 true "" ""
-"max" 1.0 0 -8630108 true "" ""
+"population max" 1.0 0 -955883 true "" ""
+"elite mean" 1.0 0 -8630108 true "" ""
+"population mean" 1.0 0 -13345367 true "" ""
+
+SWITCH
+705
+10
+867
+43
+randomly-populate?
+randomly-populate?
+1
+1
+-1000
+
+INPUTBOX
+700
+95
+1005
+155
+lineup-id
+03C2F86772864873C76B04BBD4AE5CDCBC43C5
+1
+0
+String
+
+BUTTON
+960
+175
+1072
+208
+Step Codebook
+run-codebook-once (from-hexstring codebook-id (2 ^ (2 * sight-range + 1) ) )
+NIL
+1
+T
+OBSERVER
+NIL
+NIL
+NIL
+NIL
+1
+
+SLIDER
+5
+355
+177
+388
+mutation-count
+mutation-count
+0
+10
+2.0
+1
+1
+NIL
+HORIZONTAL
 
 @#$#@#$#@
 ## WHAT IS IT?
 
-(a general understanding of what the model is trying to show or explain)
+This model attempts to use NetLogo to replicate the findings from Mitchell, Melanie and James P. Crutch. “Evolving Cellular Automata with Genetic Algorithms: A Review of Recent Work.” (2000). It uses a Genetic Algorithm to search for a one dimensional Cellular Automaton that will always converge to all cells being in the same state in which the majority of cells started. It was completed as part of the coursework for the "Introduction to Complexity" class held by Complexity Explorer ( https://www.complexityexplorer.org/courses/119-introduction-to-complexity ) Unit 6: "Cellular Automata".
 
 ## HOW IT WORKS
 
-(what rules the agents use to create the overall behavior of the model)
+### Gnomes in Hats
+
+In trying to develop some intuition for the problem, I reached for a common setup in mathematical puzzles of Gnomes in Hats (representative example [here](https://www.intelliot.com/2004/09/gnomes-puzzle/) although there are many varieties). So for this assignment, my setup was: you have an odd number of gnomes in a circle where each gnome wears a White hat or a Black hat. Each gnome can only see its own hat and the hats of some number of gnomes to their left and two gnomes to their right and otherwise cannot see any other gnomes nor can they communicate with any gnomes. At each timestep, each gnome can look at the hats they can see, and then all gnomes simultaneously and instantaneously decide to either keep their hat or put on the other color of hat. The goal is for every gnome in the circle to end up wearing the same color of hat that the majority of ALL gnomes in the cirlce were wearing at the very first timestep. Is there a uniform set of rules that every gnome can independently follow to achieve that result?
+
+I thought of each gnome having a "codebook" that every gnome shared and that they could refer to when deciding whether to change hats. "Okay, for me and the six other gnomes I can see, we are in pattern WWWBWWW. Looking up that pattern, the codebook says I should change my hat to White. Got it.". Now, there are stupendously many possible such codebooks, so the assignment is to use a Genetic Algorithm to try to find a codebook gives the gnomes the strategy to succeed.
+
+### Genetic Algorithm
+
+When the model begins, it generates a population of "codebooks" by randomly varying the density between 0 and 1 and generating a random codebook of that density. It then generates a number of random "lineups" by randomly varying the density between 0 and 1 for the configured number of trials. For each codebook in the population, it runs it on each lineup for a random number of iterations drawn from a Poisson distribution with the configured mean. If the codebook successfully classifies the lineup, it increases its fitness. No partial credit is given.
+
+The configured percentage of top fitness codebooks are kept, and new codebooks are generated by crossing over two random codebooks from among the kept elite. Crossover is achieved by slicing the two codebooks in the same random position and combining the two parts together. Then, the new codebook is mutated the configured number of times in random positions.
+
+This new generation of codebooks then repeats the process, until the configured number of generations have passed.
+
+### Representation
+
+As a row of black and white cells, a "lineup" can easily be represented as a binary number. A "lineup id" is the hexadecimal representation of this binary number.
+
+A "codebook" is a list of rules for every possible local neighborhood in the lineup. If there are 7 gnomes in a neighborhood as in the paper, there are 2^7 = 128 possible neighborhoods to have in the codebook. So a codebook can be just a listing of the 128 states that each possible neighborhood generates in the next iteration, in lexicographic order of the neighborhoods from 0000000 to 1111111. This listing itself can be represented as a 128 bit binary number. A "codebook id" is the hexadecimal representation of that binary number.
 
 ## HOW TO USE IT
 
-(how to use the model, including a description of each of the items in the Interface tab)
+### The Genetic Algorithm component
+
+* `sight-range` controls how many gnomes each gnome can see in each direction. So a "sight range" of 3 would mean each gnome can see 3 gnomes to the left and 3 gnomes to the right (as well as itself) for a total of being able to see 7 gnomes.
+* `lineup-width` controls how many "gnomes" are in the circle.
+* `trial-increments` controls how much each codebook is tested. For each 0 ≤ _trial_ ≤ `trial-increments`, the algorithm generates a random lineup with _trial_ / `trial-increments` gnomes in black hats (and the rest in in white hats) and then runs the codebook on that lineup.
+* `mean-iterations` controls the average number of iterations that the codebook Cellular Automaton will run each iteration before being checked for fitness. As in the referenced paper, this number is drawn from a Poisson distribution instead of being fixed so that the Genetic Algorithm doesn't specialize for only a specific number of iterations.
+* `num-codebooks` controls how many "codebooks" are in the population for the Genetic Algorithm.
+* `num-generations` controls the number of generations that the Genetic Algorithm will run for.
+* `selection` controls the proportion of codebooks with the highest fitness that are kept each generation.
+* `mutation-count` controls the exact number of mutations that will occur after each crossover.
+
+### The Lineup / Codebook Sandbox component
+
+* `randomly-populate?` controls whether to randomly populate the initial lineup, which will then update the `lineup-id` to the new lineup, or to use that `lineup-id` to populate the initial lineup.
+* `lineup-density` controls what density of white hats to contain in a randomly generated initial lineup.
+* `lineup-id` is the hexadecimal representation of the initial lineup. Can be used to set what you want the initial lineup to be.
+* `codebook-id` is the hexadecimal representation of what codebook to use to iterate the cellular automata.
+* `Step Codebook` steps through a single iteration of the codebook on the current lineup.
+* `Run Codebook` runs through a number of iterations of the codebook on the lineup equal to `mean-iterations`.
 
 ## THINGS TO NOTICE
 
-(suggested things for the user to notice while running the model)
+The results closely mirror those found in the referenced paper. Early successes are those that always move towards all white or all black. Crossover helps find strategies that can move "mostly black hats" to "all black hats" and "mostly white hats" to "all white hats". The strategies struggle when the initial lineup is close to 50/50 white hat and black hat.
+
+Also, as an interesting aside, in early versions of my model I didn't vary the number of iterations during fitness checking. An interesting strategy that evolved was for all of the gnomes to converge on SOME color, regardless of majority or not, and then "blink" back and forth between the colors, hoping that the simulation ended with the right color showing.
 
 ## THINGS TO TRY
 
-(suggested things for the user to try to do (move sliders, switches, etc.) with the model)
+At smaller values of `lineup-width`, the model completes quickly and often finds viable solutions.
+
+The Lineup / Codebook sandbox provides a lot of intuiton for the problem.
 
 ## EXTENDING THE MODEL
 
-(suggested things to add or change in the Code tab to make the model more complicated, detailed, accurate, etc.)
+The referenced paper contains many interesting ideas for extending this sort of model. A particular one of interest is that, because the sophisticated strategies get very good at solving low or high density lineups, their fitness seems artificially inflated by continuously testing them on those lineups. So, instead of always testing on a uniform distribution of densities, somehow incrementally increase the difficulty of the configurations that the strategies are tested on. Two possibilites of this are:
 
-## NETLOGO FEATURES
+  1. Simply narrow the range of densities tested until it gets closer and closer to 50/50; --or--
+  2. A more interesting proposal is to have the test lineups go through a genetic algorithm of their own, where the "fitter" ones are the ones that stump the most strategies. Then have the test lineups co-evolve with the strategies to solve them.
 
-(interesting or unusual features of NetLogo that the model uses, particularly in the Code tab; or where workarounds were needed for missing features)
-
-## RELATED MODELS
-
-(models in the NetLogo Models Library and elsewhere which are of related interest)
 
 ## CREDITS AND REFERENCES
 
-(a reference to the model's URL on the web if it has one, as well as any other necessary credits, citations, and links)
+Mitchell, Melanie and James P. Crutch. “Evolving Cellular Automata with Genetic Algorithms: A Review of Recent Work.” (2000).
+
+## COPYRIGHT AND LICENSE
+
+### The MIT License (MIT)
+
+Copyright 2021 Brian Stepnitz
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the “Software”), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 @#$#@#$#@
 default
 true
