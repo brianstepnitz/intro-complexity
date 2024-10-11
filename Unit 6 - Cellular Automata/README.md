@@ -50,7 +50,7 @@ A "codebook" is a list of rules for every possible local neighborhood in the lin
 
 The results closely mirror those found in the referenced paper. Early successes are those that always move towards all white or all black. Crossover helps find strategies that can move "mostly black hats" to "all black hats" and "mostly white hats" to "all white hats". The strategies struggle when the initial lineup is close to 50/50 white hat and black hat.
 
-Also, as an interesting aside, in early versions of my model I didn't vary the number of iterations during fitness checking. An interesting strategy that evolved was for all of the gnomes to converge on SOME color, regardless of majority or not, and then "blink" back and forth between the colors, hoping that the simulation ended with the right color showing.
+Also, as an interesting aside, in early versions of my model I only checked the very final tick for fitness. An interesting strategy that evolved was for all of the gnomes to converge on SOME color, regardless of majority or not, and then "blink" back and forth between the colors, hoping that the simulation ended with the right color showing on that final tick. I changed it to measure the fitness as the average of the final TWO ticks in order to discourage this behavior.
 
 ## THINGS TO TRY
 

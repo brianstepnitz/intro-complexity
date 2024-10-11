@@ -61,7 +61,7 @@ As a sort of "introduction to NetLogo", this model uses many of the basic princi
 
 ## CREDITS AND REFERENCES
 
-(a reference to the model's URL on the web if it has one, as well as any other necessary credits, citations, and links)
+[Logistic Map (Wikipedia)](https://en.wikipedia.org/w/index.php?title=Logistic_map&oldid=1241051940)
 
 ## COPYRIGHT AND LICENSE
 
